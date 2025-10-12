@@ -14,14 +14,14 @@ This project utilizes the **"Épidémiologie descriptive des cancers en Nouvelle
 ### Clone the repository
 
 ```bash
-git clone https://github.com/naima-beck/cancer_epidemiology_nc.git
-cd cancer_epidemiology_nc
+git clone https://github.com/naima-beck/machine_learning_cancer_new_caledonia.git
+cd machine_learning_cancer_new_caledonia
 ```
 
 ### Structure of the projet
 
 ```bash
-cancer_epidemiology_nc/
+machine_learning_cancer_new_caledonia/
 ├── data/             
 ├── LICENSE
 ├── notebook.Rmd             
