@@ -22,7 +22,7 @@ cd cancer_epidemiology_nc
 cancer_epidemiology_nc/
 ├── data/             
 ├── LICENSE
-├── code              
+├── notebook.Rmd             
 └── README.md
 ```
 
