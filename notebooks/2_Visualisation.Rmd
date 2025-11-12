@@ -1,0 +1,229 @@
+---
+title: "R Notebook"
+author: "Naïma Beck and Axelle Le Poul"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r}
+#install.packages(c("tidyverse", "factoextra", "cluster", "caret"))
+```
+
+
+```{r}
+library(tidyverse)
+library(factoextra)
+library(cluster)
+library(caret)
+```
+# Dataset 
+
+```{r}
+epidemiology_cancers_nc <- read.csv("../data/processed/epidemiologie_cancers_nc_clean.csv", stringsAsFactors = FALSE)
+head(epidemiology_cancers_nc)
+```
+
+# PCA
+
+## normalisation
+
+Now all variables have the same scale.
+```{r}
+epicancer_scaled <- scale(epidemiology_cancers_nc)
+
+head(epicancer_scaled)
+```
+
+```{r}
+ncol(epidemiology_cancers_nc)
+```
+ncol < 50 so it's ok
+
+## test for pca 
+```{r}
+# Inf
+sum(is.infinite(epicancer_scaled))
+```
+So we can continue.
+
+## PCA applied
+```{r}
+pca_result_cancer <- prcomp(epicancer_scaled, center = TRUE, scale. = FALSE)
+
+summary(pca_result_cancer)
+```
+The variance is highly fragmented across components, with PC1 explaining only 7% of total variance. This suggests our dataset contains multiple underlying patterns without a dominant structure."
+
+
+```{r}
+# Calcul de la variance expliquée
+variance <- pca_result_cancer$sdev^2
+variance_explained <- variance / sum(variance) * 100  # en pourcentage
+cum_variance <- cumsum(variance_explained)  # variance cumulée
+```
+
+```{r}
+# Scree plot pour voir la variance expliquée
+plot(pca_result_cancer, type = "l", main = "Scree Plot")
+```
+
+```{r}
+# Quelles variables contribuent le plus à PC1?
+loadings <- pca_result_cancer$rotation[,1]
+important_vars <- sort(abs(loadings), decreasing = TRUE)[1:10]
+print("Top 10 variables contributing to PC1:")
+print(important_vars)
+```
+
+
+### visualisation
+
+
+```{r}
+pca_var_df <- data.frame(
+  PC = factor(paste0("PC", 1:length(variance_explained)), 
+              levels = paste0("PC", 1:length(variance_explained))),
+  Variance = variance_explained,
+  Cumulative = cum_variance
+)
+
+ggplot(pca_var_df, aes(x = PC, y = Variance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Cumulative, group = 1), color = "red", size = 1) +
+  geom_point(aes(y = Cumulative), color = "red", size = 2) +
+  theme_minimal() +
+  labs(title = "Proportion de variance expliquée par chaque PC",
+       y = "% Variance expliquée", x = "Composantes principales") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_discrete(breaks = paste0("PC", seq(1, length(variance_explained), by = 5)))  # Montrer 1 PC sur 5
+```
+L'information est uniformément répartie sur 31 composantes
+Aucune composante ne ressort particulièrement
+Structure multidimensionnelle sans axe dominant. 
+L'absence de 'coude' marqué et la pente affine jusqu'à PC31 indiquent une structure multidimensionnelle complexe sans axes principaux dominants.
+
+Cette uniformité de la variance expliquée suggère que l'information est répartie de façon homogène entre les composantes, probablement en raison du grand nombre de variables catégorielles encodées.
+
+Les dernières PC n'apportent aucune information nouvelle, elles capturent probablement du bruit ou de la redondance.
+Le plateau atteint à PC31 (100% de variance cumulée) confirme que les dernières composantes sont redondantes et peuvent être éliminées.
+
+Trop de variables colinéaires à cause du dummy encoding. Chaque variable dummy apporte un peu d'information, mais aucune n'est vraiment importante.
+
+# à supp je pense
+```{r}
+pca_coords_cancer <- as.data.frame(pca_result_cancer$x[,1:2])  # PC1 et PC2
+pca_coords_cancer
+
+```
+
+# Clustering
+
+```{r}
+# Trouver combien de PC pour avoir 70-80% de variance
+nb_pc_70 <- which(cum_variance >= 70)[1]
+nb_pc_80 <- which(cum_variance >= 80)[1]
+
+cat("PC pour 70% variance:", nb_pc_70)
+cat("PC pour 80% variance:", nb_pc_80)
+```
+Mauvais signe, prouve encore que les données sont extrèmement dilluées, aucune structure forte ne ressort, le dummy encoding a créé du bruit dimensionnel.
+
+```{r}
+# Prendre 10 PC maximum malgré tout
+composantes_kmeans <- pca_result_cancer$x[, 1:10]
+kmeans_result <- kmeans(composantes_kmeans, centers = 3)
+```
+
+```{r}
+# Méthode du coude pour choisir k
+wss <- sapply(1:10, function(k){kmeans(composantes_kmeans, k, nstart=25)$tot.withinss})
+plot(1:10, wss, type="b", xlab="Number of Clusters", ylab="Within-cluster SS")
+```
+L'analyse de la méthode du coude révèle deux points d'inflexion : une première baisse significative du taux d'amélioration à k=5 (8.0% vs 12.3% pour k=4), et une seconde à k=8 (5.9%). J'ai sélectionné k=5 car il représente le premier compromis optimal entre réduction de variance et complexité du modèle.
+
+### à supp mais explique le code plus haut
+```{r}
+# Calcul des WSS pour k=1 à 10
+wss_values <- sapply(1:10, function(k){
+  kmeans_result <- kmeans(composantes_kmeans, k, nstart = 25)
+  return(kmeans_result$tot.withinss)
+})
+
+# Afficher les valeurs exactes
+cat("Within-Cluster Sum of Squares pour k=1 à 10:\n")
+for(k in 1:10) {
+  cat("k =", k, ": WSS =", round(wss_values[k], 2), "\n")
+}
+
+# Afficher les réductions en pourcentage
+cat("\nRéduction du WSS (en %):\n")
+for(k in 2:10) {
+  reduction <- (wss_values[k-1] - wss_values[k]) / wss_values[k-1] * 100
+  cat("k =", k, ": amélioration de", round(reduction, 1), "%\n")
+}
+```
+
+
+
+### kmeans k=3 : on ne fait pas ça
+```{r}
+# Appliquer K-means
+kmeans_result <- kmeans(composantes_kmeans, centers = 3)
+kmeans_result
+```
+Between_SS / total_SS = 30.9 %
+The K-means clustering shows limited separation (31% between-cluster variance), indicating weak cluster structure. This may result from the high-dimensional nature of the data or the absence of natural groupings.
+
+
+## k-means k=5
+```{r}
+kmeans_result <- kmeans(composantes_kmeans, centers = 5, nstart = 25)
+# Et ensuite assigner les clusters à tes données
+epidemiology_cancers_nc$cluster <- as.factor(kmeans_result$cluster)
+
+pca_coords_cancer$cluster <- as.factor(kmeans_result$cluster)
+
+# 4. Voir la qualité
+cat("Qualité du clustering:", 
+    round(kmeans_result$betweenss/kmeans_result$totss*100, 1), "% de variance expliquée")
+```
+
+```{r}
+# Visualisation des clusters
+library(ggplot2)
+cluster_data <- data.frame(PC1 = composantes_principales[,1],
+                          PC2 = composantes_principales[,2],
+                          Cluster = as.factor(kmeans_result$cluster))
+
+ggplot(cluster_data, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.6) +
+  ggtitle("K-means Clusters on PCA Components")
+```
+
+
+
+### jsp à quoi ca sert
+```{r}
+dist_matrix <- dist(pca_coords_cancer[,1:2])  # distance entre points
+hc <- hclust(dist_matrix, method = "ward.D2")
+plot(hc, labels = FALSE, main = "Dendrogramme Clustering Hiérarchique")
+rect.hclust(hc, k = 5, border = "red")  # optionnel : dessiner les clusters
+
+```
+
+
+
+### jsp à quoi ca sert
+```{r}
+cluster_summary <- epidemiology_cancers_nc %>%
+  mutate(cluster = kmeans_result$cluster) %>%
+  group_by(cluster) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+```
+
+
+Note: The poor PCA performance (PC1 = 7% variance) is expected when using dummy encoding with many categorical variables.
+This confirms we need variable selection for better results.
+
