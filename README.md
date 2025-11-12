@@ -22,9 +22,13 @@ cd machine_learning_cancer_new_caledonia
 
 ```bash
 machine_learning_cancer_new_caledonia/
-├── data/             
+├── data/
+   ├── raw/
+   └── processed/           
 ├── LICENSE
-├── notebook.Rmd             
+├── notebook/
+   ├── 1_Cleaning.Rmd
+   └── 2_Visualisation.Rmd           
 └── README.md
 ```
 
