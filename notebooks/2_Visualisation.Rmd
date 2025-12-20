@@ -1,0 +1,412 @@
+---
+title: "PCA and Clustering Applied to Cancer Epidemiological Data in New Caledonia "
+author: "Naïma Beck and Axelle Le Poul"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r}
+library(factoextra)
+library(ggplot2)
+library(dplyr)
+library(dbscan)
+library(cluster)
+```
+
+
+# 1. Importation of the cleaned dataset 
+
+```{r}
+epidemiology_cancers_nc <- read.csv("../data/processed/epidemiologie_cancers_nc_clean.csv", stringsAsFactors = FALSE)
+head(epidemiology_cancers_nc)
+```
+
+```{r}
+colnames(epidemiology_cancers_nc)
+```
+
+# 2. Full dataset
+
+```{r}
+epidemiology_cancers_nc2 <- epidemiology_cancers_nc %>%
+  select(-"ANNEE", -"rang", -"frequence", -"CLASSE_AGETous.ages")
+```
+We are doing this to remove non-informative and redundant variables so the PCA focuses only on meaningful epidemiological features instead of noise or duplicated information. 
+
+## 2.1 PCA
+
+### Normalisation
+
+Now all variables have the same scale.
+```{r}
+epicancer_scaled <- scale(epidemiology_cancers_nc2)
+```
+
+```{r}
+ncol(epidemiology_cancers_nc2)
+```
+ncol < 50 so it's ok
+
+### test for pca 
+```{r}
+# Inf
+sum(is.infinite(epicancer_scaled))
+```
+So we can continue.
+
+### PCA applied
+
+```{r}
+pca_result_cancer <- prcomp(epicancer_scaled, center = TRUE, scale = TRUE)
+
+summary(pca_result_cancer)
+```
+### Scree plot 
+```{r}
+library(factoextra)
+
+fviz_eig(pca_result_cancer, 
+         addlabels = TRUE, 
+         geom = "bar", 
+         ylim = c(0, 100))
+```
+The PCA results show that the structure of the dataset is weakly organized, with no dominant pattern explaining a substantial portion of the variance. The first principal component accounts for less than seven percent of the total variance, and adding several more components still captures only a modest amount of information, indicating that the variables are largely uncorrelated. This behavior is expected given that most variables are binary indicators representing mutually exclusive cancer sites or age groups, combined with a few continuous variables such as ASR. Such data provide little shared variance for PCA to extract, causing the method to distribute information across many dimensions rather than concentrating it in the first few components. Consequently, the PCA is not particularly effective at reducing dimensionality or revealing clear latent structures in this context. Nonetheless, it confirms that the dataset is highly sparse and that patterns such as sex-specific cancer types or age-related distributions arise more from categorical distinctions than from continuous correlations.
+
+### Biplot
+```{r}
+fviz_pca_ind(pca_result_cancer, geom="text")
+```
+The PCA biplot appears cluttered and compact because the first components explain only a very small proportion of the total variance, and the dataset contains many weakly correlated variables. As a result, no dominant structure emerges, the projection collapses into a dense cloud, and the variable vectors become too small and dispersed to interpret meaningfully.
+
+### Variance and cumulative variance
+```{r}
+variance <- pca_result_cancer$sdev^2  
+pve <- variance / sum(variance)  
+
+par(mfrow = c(1, 2))
+
+
+plot(pve, xlab = "Principale component",
+     ylab = "Proportion of explained variance",
+     ylim = c(0, 1), type = "b")
+
+plot(cumsum(pve), xlab = "Principale component",
+     ylab = "Cumulative Proportion of explained variance",
+     ylim = c(0, 1), type = "b")
+
+par(mfrow = c(1,1))
+```
+The plots show that proportion of explained variance is weak for each PC, there is no dominant axis. The cumulative explained variance is rather linear, that means there is no strong structure in the data.
+
+## 2.2 K-means 
+
+### Elbow method to choose k
+
+First, we are doing it without the PCA because using PCA make us lose informations.
+```{r}
+set.seed(123)
+inertie <- numeric(50)
+
+for (k in 1:50) {
+  km <- kmeans(epicancer_scaled, centers = k, nstart = 25)
+  inertie[k] <- km$tot.withinss
+}
+
+plot(1:50, inertie, type = "b",
+     xlab = "k",
+     ylab = "Inertie intra-cluster",
+     main = "Elbow method")
+```
+
+Here we don't have a significant result for the elbow method so we're gonna try with the silhouette method
+```{r}
+sil_avg <- sapply(2:50, function(k) {
+  km <- kmeans(epicancer_scaled, centers = k, nstart = 25)
+  mean(silhouette(km$cluster, dist(epicancer_scaled))[,3])
+})
+```
+
+### Visualisation
+```{r}
+plot(2:50, sil_avg, type="b",
+     xlab="Number of clusters (k)",
+     ylab="Silhouette mean",
+     main="Choice of k (k = 2 to 50)")
+
+```
+
+### Best k
+```{r}
+k_values <- 2:50
+best_k <- k_values[which.max(sil_avg)]
+
+cat("Best k :", best_k, "\n")
+```
+
+```{r}
+k_optimal <- 25
+
+set.seed(123)
+km_result <- kmeans(epicancer_scaled, centers = k_optimal, nstart = 25)
+
+#km_result$cluster
+
+fviz_cluster(km_result, data = epicancer_scaled,
+             geom = "point",
+             ellipse.type = "norm",
+             main = paste("K-means clustering sur les 7 PC (k =", k_optimal, ")"))
+```
+
+## 2.3 Hierarchical clustering 
+
+```{r}
+d <- dist(epicancer_scaled, method = "euclidean")
+
+hc <- hclust(d, method = "complete")
+
+plot(hc, main = "Hierarchical Clustering")
+```
+
+
+## 2.4 DBSCAN
+
+We choosed to stop doing the Clustering with this dataset because the plot are not relevant. 
+
+# 3. Dataset reduced to breast and prostate cancers
+
+```{r}
+cols_pca <- c("SEXE", "nb_cas", "asr",
+              "CODE_CIM10C50",  # breast cancer
+              "CODE_CIM10C61",  # prostate cancer
+              grep("CLASSE_AGE", colnames(epidemiology_cancers_nc), value = TRUE)
+              )
+
+```
+
+```{r}
+epicancer_pca <- epidemiology_cancers_nc[, cols_pca]
+```
+
+## 3.1 PCA 
+
+### Normalisation
+```{r}
+epicancer_scaled <- scale(epicancer_pca)
+```
+
+### PCA applied
+```{r}
+pca_result <- prcomp(epicancer_scaled, center = TRUE, scale. = FALSE)
+
+summary(pca_result)
+```
+
+### Scree plot and cumulative variance
+```{r}
+par(mfrow = c(1, 2))
+
+variance <- pca_result$sdev^2
+pve <- variance / sum(variance)
+
+plot(pve[1:10], type="b", xlab="PC", ylab="Proportion of explained variance")
+
+plot(cumsum(pve[1:10]), type="b", xlab="PC", ylab="cumulative variance")
+
+par(mfrow = c(1,1))
+```
+In this second set of PCA results, the first principal component explains a larger share of variance (16.16%), with PC2 at 13.60%, PC3 at 12.56%, and so on. The cumulative variance reaches 100% by PC9, suggesting that fewer components are needed to capture most of the dataset’s variation in this analysis.
+
+### Scree plot 
+```{r}
+library(factoextra)
+
+fviz_eig(pca_result, 
+         addlabels = TRUE, 
+         geom = "bar", 
+         ylim = c(0, 100))
+```
+
+### Biplot 
+```{r}
+fviz_pca_ind(pca_result, geom="text")
+```
+
+
+## 3.2 K-means 
+
+### Elbow method to choose k
+
+We do the albow again with the new data to see if we find a smaller one
+```{r}
+pca_scores7 <- pca_result$x[, 1:7]  # 7 first PC (=85%)
+
+set.seed(123)
+
+fviz_nbclust(pca_scores7, kmeans, method = "wss") +
+  labs(x = "Nomber of k clusters",
+       y = "Total within-cluster sum of squares (WSS)")
+
+```
+So, we can choose k=6
+
+### Visualization
+```{r}
+k_optimal <- 6
+
+set.seed(123) 
+km_result <- kmeans(pca_scores7, centers = k_optimal, nstart = 25)
+
+#km_result$cluster
+
+fviz_cluster(km_result, data = pca_scores7,
+             geom = "point",
+             ellipse.type = "norm",
+             main = paste("K-means clustering with 7 PC (k =", k_optimal, ")"))
+```
+### Informations
+```{r}
+km_result$centers
+```
+
+```{r}
+pca_loadings <- pca_result$rotation[, 1:7]  # PC1 to PC7
+pca_loadings
+```
+
+## 3.3 Hierarchical clustering 
+
+```{r}
+d <- dist(pca_scores7)
+hc <- hclust(d, method = "complete")
+plot(hc)
+```
+It is complicated to see, so we're going to use de ward method.
+
+```{r}
+hc <- hclust(d, method="ward.D2")
+
+# sample (max 100 points)
+sample_idx <- sample(1:nrow(pca_scores7), size=min(100, nrow(pca_scores7)))
+hc_sample <- hclust(dist(pca_scores7[sample_idx,]), method="ward.D2")
+
+
+plot(hc_sample, labels=FALSE, hang=-1,
+     main="Cluster dendogramm (sample)")
+rect.hclust(hc_sample, k=6, border="red")  #6 clusters
+```
+
+## 3.4 DBSCAN
+
+### kNN distance plot
+
+We do this in order to choose the right epsilon (eps)
+```{r}
+minPts <- 2 * ncol(pca_scores7)
+
+kNNdistplot(pca_scores7, k = minPts)
+abline(h=0, col="blue", lty=2) 
+title(main="kNN distance plot for DBSCAN")
+```
+We may choose eps = 2.
+
+```{r}
+eps_val <- 2
+
+dbscan_result <- dbscan(pca_scores7, eps = eps_val, minPts = minPts)
+
+# clusters attributed
+table(dbscan_result$cluster)
+```
+### Visualization
+```{r}
+fviz_cluster(dbscan_result, data = pca_scores7,
+             stand = FALSE,
+             geom = "point",
+             main = paste("DBSCAN clustering with 7 PC (eps =", eps_val, ")"))
+```
+# 4. Interpretation of clustering for the dataset reduced to breast and prostate cancers
+
+```{r}
+compute_and_plot_variable_importance <- function(pca_scores, cluster_labels, pca_loadings, 
+                                                 top_n = 5, plot_title = "Variable importance per cluster") {
+  library(dplyr)
+  library(ggplot2)
+
+  clusters_unique <- sort(unique(cluster_labels))
+
+  cluster_centers <- sapply(clusters_unique, function(cl) {
+    colMeans(pca_scores[cluster_labels == cl, , drop = FALSE])
+  })
+  cluster_centers <- t(cluster_centers)
+
+  get_variable_importance <- function(cluster_center, pca_loadings){
+    cluster_center <- as.matrix(cluster_center, ncol = 1)
+    importance <- abs(pca_loadings %*% cluster_center)
+    importance <- as.vector(importance)
+    names(importance) <- rownames(pca_loadings)
+    sort(importance, decreasing = TRUE)
+  }
+
+  all_importance <- data.frame()
+  for (i in 1:nrow(cluster_centers)) {
+    imp <- get_variable_importance(cluster_centers[i, ], pca_loadings)
+    df <- data.frame(
+      Variable = names(imp),
+      Importance = imp,
+      Cluster = paste0("Cluster_", clusters_unique[i])
+    )
+    all_importance <- rbind(all_importance, df)
+  }
+
+  top_df <- all_importance %>%
+    group_by(Cluster) %>%
+    slice_max(order_by = Importance, n = top_n)
+
+  p <- ggplot(top_df, aes(x = reorder(Variable, Importance), y = Importance, fill = Cluster)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    facet_wrap(~Cluster, scales = "free_y") +
+    labs(title = plot_title, x = "Variable", y = "Importance") +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+  print(p)
+  return(top_df)
+}
+```
+
+
+## 4.1 K-means
+
+```{r}
+top_kmeans <- compute_and_plot_variable_importance(
+  pca_scores = pca_scores7,
+  cluster_labels = km_result$cluster,
+  pca_loadings = pca_result$rotation[, 1:7],
+  plot_title = "Top 5 variables influencing K-means clusters"
+)
+```
+```{r}
+top_kmeans
+```
+
+
+## 4.2 Hierarchical clustering
+```{r}
+hc_clusters <- cutree(hc, k = 6)
+
+top_hierarchical <- compute_and_plot_variable_importance(
+  pca_scores = pca_scores7,
+  cluster_labels = hc_clusters,
+  pca_loadings = pca_result$rotation[, 1:7],
+  plot_title = "Top 5 variables influencing hierarchical clusters"
+)
+```
+```{r}
+top_hierarchical
+```
+
+
+
+
