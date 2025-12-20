@@ -25,16 +25,13 @@ machine_learning_cancer_new_caledonia/
 ├── data/
    ├── raw/
    └── processed/           
-├── LICENSE
+├── report.pdf
 ├── notebook/
    ├── 1_Cleaning.Rmd
    └── 2_Visualisation.Rmd           
 └── README.md
 ```
 
-## References
-
-- **[content of the projet](./references/nom.pdf)**
 
 ## Authors
 
